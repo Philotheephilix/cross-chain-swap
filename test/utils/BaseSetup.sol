@@ -4,6 +4,8 @@ pragma solidity 0.8.23;
 import { Test } from "forge-std/Test.sol";
 
 import { IWETH, LimitOrderProtocol } from "limit-order-protocol/contracts/LimitOrderProtocol.sol";
+import { WrappedTokenMock } from "limit-order-protocol/contracts/mocks/WrappedTokenMock.sol";
+import { IFeeBank } from "limit-order-settlement/contracts/interfaces/IFeeBank.sol";
 import { TokenCustomDecimalsMock } from "solidity-utils/contracts/mocks/TokenCustomDecimalsMock.sol";
 import { TokenMock } from "solidity-utils/contracts/mocks/TokenMock.sol";
 
@@ -14,11 +16,9 @@ import { EscrowFactory } from "../../contracts/EscrowFactory.sol";
 import { IBaseEscrow } from "../../contracts/interfaces/IBaseEscrow.sol";
 import { EscrowFactoryZkSync } from "../../contracts/zkSync/EscrowFactoryZkSync.sol";
 import { Utils } from "./Utils.sol";
-import { NoReceive } from "./mocks/NoReceive.sol";
-import { CustomPostInteraction } from "./mocks/CustomPostInteraction.sol";
 import { CrossChainTestLib } from "./libraries/CrossChainTestLib.sol";
 import { Timelocks } from "./libraries/TimelocksSettersLib.sol";
-import { FeeCalcLib } from "./libraries/FeeCalcLib.sol";
+
 
 /* solhint-disable max-states-count */
 contract BaseSetup is Test, Utils {
@@ -31,43 +31,26 @@ contract BaseSetup is Test, Utils {
     uint256 internal constant DST_SAFETY_DEPOSIT = 0.05 ether;
     uint32 internal constant RESOLVER_FEE = 100;
     uint32 internal constant RESCUE_DELAY = 604800; // 7 days
-    uint256 internal constant PROTOCOL_FEE = 40000;
-    uint256 internal constant INTEGRATOR_FEE = 5000;
-    uint256 internal constant INTEGRATOR_SHARES = 20;
-    uint256 internal constant FEES_AMOUNT = 0.1 ether;
-    uint256 internal constant PROTOCOL_FEE_AMOUNT = 0.096 ether;
-    uint256 internal constant WHITELIST_PROTOCOL_FEE_DISCOUNT = 50;
-    uint256 internal constant RATE_BUMP = 900000;
-
-    uint256 internal constant BASE_1E5 = 1e5;
-    uint256 internal constant BASE_1E7 = 1e7;
-    uint256 internal constant BASE_1E2 = 100;
 
     Wallet internal alice;
     Wallet internal bob;
     Wallet internal charlie;
-    Wallet internal mary;
 
     TokenMock internal dai;
     TokenCustomDecimalsMock internal usdc;
+    WrappedTokenMock internal weth;
     TokenMock internal inch;
-    TokenMock internal accessToken;
 
     LimitOrderProtocol internal limitOrderProtocol;
     BaseEscrowFactory internal escrowFactory;
     EscrowSrc internal escrowSrc;
     EscrowDst internal escrowDst;
+    IFeeBank internal feeBank;
 
     address[] internal resolvers;
 
-    address internal integratorFeeReceiver;
-    address internal protocolFeeReceiver;
-
     Timelocks internal timelocks;
     Timelocks internal timelocksDst;
-
-    NoReceive internal nativeTokenRejector;
-    CustomPostInteraction internal customPostInteractor;
 
     CrossChainTestLib.SrcTimelocks internal srcTimelocks = CrossChainTestLib.SrcTimelocks({
         withdrawal: 120,
@@ -81,7 +64,6 @@ contract BaseSetup is Test, Utils {
         cancellation: 900
     });
     bytes internal auctionPoints = abi.encodePacked(
-        uint8(5), // amount of points
         uint24(800000), uint16(100),
         uint24(700000), uint16(100),
         uint24(600000), uint16(100),
@@ -96,84 +78,63 @@ contract BaseSetup is Test, Utils {
     function setUp() public virtual {
         bytes32 profileHash = keccak256(abi.encodePacked(vm.envString("FOUNDRY_PROFILE")));
         if (profileHash == CrossChainTestLib.ZKSYNC_PROFILE_HASH) isZkSync = true;
-        _createUsers(6);
+        _createUsers(3);
 
         alice = users[0];
-        bob = users[1];
-        charlie = users[2];
-        mary = users[3];
-
         vm.label(alice.addr, "Alice");
+        bob = users[1];
         vm.label(bob.addr, "Bob");
+        charlie = users[2];
         vm.label(charlie.addr, "Charlie");
-        vm.label(mary.addr, "Mary");
 
         resolvers = new address[](1);
         resolvers[0] = bob.addr;
 
-        integratorFeeReceiver = users[4].addr;
-        protocolFeeReceiver = users[5].addr;
-
         _deployTokens();
         dai.mint(bob.addr, 1000 ether);
-        dai.mint(mary.addr, 1000 ether);
         usdc.mint(alice.addr, 1000 ether);
         inch.mint(bob.addr, 1000 ether);
-        inch.mint(mary.addr, 1000 ether);
-        accessToken.mint(bob.addr, 1);
 
         (timelocks, timelocksDst) = CrossChainTestLib.setTimelocks(srcTimelocks, dstTimelocks);
 
         _deployContracts();
 
-        vm.prank(bob.addr);
+        vm.startPrank(bob.addr);
         dai.approve(address(escrowFactory), 1000 ether);
-
+        inch.approve(address(feeBank), 1000 ether);
+        feeBank.deposit(10 ether);
+        vm.stopPrank();
         vm.prank(alice.addr);
         usdc.approve(address(limitOrderProtocol), 1000 ether);
-
-        vm.prank(mary.addr);
-        dai.approve(address(escrowFactory), 1000 ether);
     }
 
     function _deployTokens() internal {
         dai = new TokenMock("DAI", "DAI");
-        usdc = new TokenCustomDecimalsMock("USDC", "USDC", 1000 ether, 6);
-        inch = new TokenMock("1INCH", "1INCH");
-        accessToken = new TokenMock("ACCESS", "ACCESS");
-
         vm.label(address(dai), "DAI");
+        usdc = new TokenCustomDecimalsMock("USDC", "USDC", 1000 ether, 6);
         vm.label(address(usdc), "USDC");
+        weth = new WrappedTokenMock("WETH", "WETH");
+        vm.label(address(weth), "WETH");
+        inch = new TokenMock("1INCH", "1INCH");
         vm.label(address(inch), "1INCH");
-        vm.label(address(accessToken), "ACCESS");
     }
 
     function _deployContracts() internal {
-        limitOrderProtocol = new LimitOrderProtocol(IWETH(address(0)));
+        limitOrderProtocol = new LimitOrderProtocol(IWETH(weth));
 
         if (isZkSync) {
-            escrowFactory = new EscrowFactoryZkSync(
-                address(limitOrderProtocol), accessToken, charlie.addr,  RESCUE_DELAY, RESCUE_DELAY
-            );
+            escrowFactory = new EscrowFactoryZkSync(address(limitOrderProtocol), inch, inch, charlie.addr,  RESCUE_DELAY, RESCUE_DELAY);
         } else {
-            escrowFactory = new EscrowFactory(
-                address(limitOrderProtocol),
-                accessToken,
-                charlie.addr,
-                RESCUE_DELAY,
-                RESCUE_DELAY
-            );
+            escrowFactory = new EscrowFactory(address(limitOrderProtocol), inch, inch, charlie.addr, RESCUE_DELAY, RESCUE_DELAY);
         }
-        escrowSrc = EscrowSrc(escrowFactory.ESCROW_SRC_IMPLEMENTATION());
-        escrowDst = EscrowDst(escrowFactory.ESCROW_DST_IMPLEMENTATION());
-
-        nativeTokenRejector = new NoReceive();
-        customPostInteractor = new CustomPostInteraction();
-
         vm.label(address(escrowFactory), "EscrowFactory");
+        escrowSrc = EscrowSrc(escrowFactory.ESCROW_SRC_IMPLEMENTATION());
         vm.label(address(escrowSrc), "EscrowSrc");
+        escrowDst = EscrowDst(escrowFactory.ESCROW_DST_IMPLEMENTATION());
         vm.label(address(escrowDst), "EscrowDst");
-        vm.label(address(nativeTokenRejector), "NoReceive");
+
+        feeBank = IFeeBank(escrowFactory.FEE_BANK());
+        vm.label(address(feeBank), "FeeBank");
     }
 
     function _prepareDataSrc(bool fakeOrder, bool allowMultipleFills) internal returns(CrossChainTestLib.SwapData memory) {
@@ -185,14 +146,13 @@ contract BaseSetup is Test, Utils {
             DST_SAFETY_DEPOSIT,
             address(0),
             fakeOrder,
-            allowMultipleFills,
-            ""
+            allowMultipleFills
         );
     }
 
     function _prepareDataSrcHashlock(
         bytes32 hashlock,
-        bool fakeOrder,
+        bool fakeOrder, 
         bool allowMultipleFills
     ) internal returns(CrossChainTestLib.SwapData memory) {
         return _prepareDataSrcCustom(
@@ -203,8 +163,7 @@ contract BaseSetup is Test, Utils {
             DST_SAFETY_DEPOSIT,
             address(0),
             fakeOrder,
-            allowMultipleFills,
-            ""
+            allowMultipleFills
         );
     }
 
@@ -216,8 +175,7 @@ contract BaseSetup is Test, Utils {
         uint256 dstSafetyDeposit,
         address receiver,
         bool fakeOrder,
-        bool allowMultipleFills,
-        bytes memory customDataForPostInteraction
+        bool allowMultipleFills
     ) internal returns(CrossChainTestLib.SwapData memory swapData) {
         swapData = CrossChainTestLib.prepareDataSrc(
             CrossChainTestLib.OrderDetails({
@@ -239,14 +197,7 @@ contract BaseSetup is Test, Utils {
                     0, // delay
                     900000, // initialRateBump
                     auctionPoints
-                ),
-                protocolFeeRecipient: protocolFeeReceiver,
-                integratorFeeRecipient: integratorFeeReceiver,
-                protocolFee: uint16(PROTOCOL_FEE),
-                integratorFee: uint16(INTEGRATOR_FEE),
-                integratorShare: uint8(INTEGRATOR_SHARES),
-                whitelistDiscountNumerator: uint8(WHITELIST_PROTOCOL_FEE_DISCOUNT),
-                customDataForPostInteraction: customDataForPostInteraction
+                )
             }),
             CrossChainTestLib.EscrowDetails({
                 hashlock: hashlock,
@@ -254,26 +205,14 @@ contract BaseSetup is Test, Utils {
                 fakeOrder: fakeOrder,
                 allowMultipleFills: allowMultipleFills
             }),
-            payable(escrowFactory),
+            address(escrowFactory),
             limitOrderProtocol
         );
     }
 
     function _prepareDataDst(
     ) internal view returns (IBaseEscrow.Immutables memory escrowImmutables, uint256 srcCancellationTimestamp, EscrowDst escrow) {
-        return _prepareDataDstCustom(
-            HASHED_SECRET,
-            TAKING_AMOUNT,
-            alice.addr,
-            resolvers[0],
-            address(dai),
-            DST_SAFETY_DEPOSIT,
-            PROTOCOL_FEE,
-            INTEGRATOR_FEE,
-            INTEGRATOR_SHARES,
-            WHITELIST_PROTOCOL_FEE_DISCOUNT,
-            true
-        );
+        return _prepareDataDstCustom(HASHED_SECRET, TAKING_AMOUNT, alice.addr, resolvers[0], address(dai), DST_SAFETY_DEPOSIT);
     }
 
     function _prepareDataDstCustom(
@@ -282,22 +221,8 @@ contract BaseSetup is Test, Utils {
         address maker,
         address taker,
         address token,
-        uint256 safetyDeposit,
-        uint256 protocolFee,
-        uint256 integratorFee,
-        uint256 integratorShares,
-        uint256 whitelistDiscount,
-        bool isWhitelisted
+        uint256 safetyDeposit
     ) internal view returns (IBaseEscrow.Immutables memory, uint256, EscrowDst) {
-        protocolFee = isWhitelisted ? protocolFee * whitelistDiscount / BASE_1E2 : protocolFee;
-
-        (uint256 integratorFeeAmount, uint256 protocolFeeAmount) = FeeCalcLib.getFeeAmounts(
-            amount,
-            protocolFee,
-            integratorFee,
-            integratorShares
-        );
-
         bytes32 orderHash = bytes32(block.timestamp); // fake order hash
         uint256 srcCancellationTimestamp = block.timestamp + srcTimelocks.cancellation;
         IBaseEscrow.Immutables memory escrowImmutables = CrossChainTestLib.buildDstEscrowImmutables(
@@ -308,13 +233,8 @@ contract BaseSetup is Test, Utils {
             taker,
             token,
             safetyDeposit,
-            timelocksDst,
-            protocolFeeReceiver,
-            integratorFeeReceiver,
-            protocolFeeAmount,
-            integratorFeeAmount
+            timelocksDst
         );
-
         return (escrowImmutables, srcCancellationTimestamp, EscrowDst(escrowFactory.addressOfEscrowDst(escrowImmutables)));
     }
 }

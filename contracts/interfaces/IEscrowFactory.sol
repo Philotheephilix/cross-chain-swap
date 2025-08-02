@@ -28,7 +28,6 @@ interface IEscrowFactory {
         Address token;
         uint256 safetyDeposit;
         uint256 chainId;
-        bytes parameters;
     }
 
     error InsufficientEscrowBalance();
@@ -49,6 +48,14 @@ interface IEscrowFactory {
      * @param taker The address of the taker.
      */
     event DstEscrowCreated(address escrow, bytes32 hashlock, Address taker);
+    
+    /**
+     * @notice Emitted on EscrowSrc deployment (for testing purposes).
+     * @param escrow The address of the created escrow.
+     * @param hashlock The hash of the secret.
+     * @param maker The address of the maker.
+     */
+    event SrcEscrowCreatedDirect(address escrow, bytes32 hashlock, Address maker);
 
     /* solhint-disable func-name-mixedcase */
     /// @notice Returns the address of implementation on the source chain.
@@ -65,6 +72,15 @@ interface IEscrowFactory {
      * @param srcCancellationTimestamp The start of the cancellation period for the source chain.
      */
     function createDstEscrow(IBaseEscrow.Immutables calldata dstImmutables, uint256 srcCancellationTimestamp) external payable;
+
+    /**
+     * @notice Creates a new escrow contract for maker on the source chain (for testing purposes).
+     * @dev This function allows direct creation of source escrows without going through the Limit Order Protocol.
+     * The caller must send the safety deposit in the native token and approve the source token to be transferred.
+     * @param srcImmutables The immutables of the escrow contract that are used in deployment.
+     * @return escrow The address of the created escrow contract.
+     */
+    function createSrcEscrow(IBaseEscrow.Immutables calldata srcImmutables) external payable returns (address escrow);
 
     /**
      * @notice Returns the deterministic address of the source escrow based on the salt.

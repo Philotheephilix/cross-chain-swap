@@ -12,12 +12,10 @@ import { CrossChainTestLib } from "../utils/libraries/CrossChainTestLib.sol";
 
 contract MerkleStorageInvalidatorTest is BaseSetup {
 
-    Merkle public merkle;
+    Merkle public merkle = new Merkle();
     bytes32 public root;
 
     function setUp() public virtual override {
-        merkle = new Merkle();
-        root = bytes32(0);
         BaseSetup.setUp();
     }
 

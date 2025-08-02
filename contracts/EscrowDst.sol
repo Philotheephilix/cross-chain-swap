@@ -7,7 +7,6 @@ import { SafeERC20 } from "solidity-utils/contracts/libraries/SafeERC20.sol";
 import { AddressLib, Address } from "solidity-utils/contracts/libraries/AddressLib.sol";
 
 import { Timelocks, TimelocksLib } from "./libraries/TimelocksLib.sol";
-import { ImmutablesLib } from "./libraries/ImmutablesLib.sol";
 
 import { IEscrowDst } from "./interfaces/IEscrowDst.sol";
 import { BaseEscrow } from "./BaseEscrow.sol";
@@ -24,9 +23,8 @@ contract EscrowDst is Escrow, IEscrowDst {
     using SafeERC20 for IERC20;
     using AddressLib for Address;
     using TimelocksLib for Timelocks;
-    using ImmutablesLib for Immutables;
 
-    constructor(uint32 rescueDelay, IERC20 accessToken) BaseEscrow(rescueDelay, accessToken) {}
+    constructor(uint32 rescueDelay) BaseEscrow(rescueDelay) {}
 
     /**
      * @notice See {IBaseEscrow-withdraw}.
@@ -35,7 +33,7 @@ contract EscrowDst is Escrow, IEscrowDst {
      */
     function withdraw(bytes32 secret, Immutables calldata immutables)
         external
-        onlyTaker(immutables.taker.get())
+        onlyTaker(immutables)
         onlyAfter(immutables.timelocks.get(TimelocksLib.Stage.DstWithdrawal))
         onlyBefore(immutables.timelocks.get(TimelocksLib.Stage.DstCancellation))
     {
@@ -49,7 +47,6 @@ contract EscrowDst is Escrow, IEscrowDst {
      */
     function publicWithdraw(bytes32 secret, Immutables calldata immutables)
         external
-        onlyAccessTokenHolder()
         onlyAfter(immutables.timelocks.get(TimelocksLib.Stage.DstPublicWithdrawal))
         onlyBefore(immutables.timelocks.get(TimelocksLib.Stage.DstCancellation))
     {
@@ -63,8 +60,8 @@ contract EscrowDst is Escrow, IEscrowDst {
      */
     function cancel(Immutables calldata immutables)
         external
-        onlyTaker(immutables.taker.get())
-        onlyValidImmutables(immutables.hash())
+        onlyTaker(immutables)
+        onlyValidImmutables(immutables)
         onlyAfter(immutables.timelocks.get(TimelocksLib.Stage.DstCancellation))
     {
         _uniTransfer(immutables.token.get(), immutables.taker.get(), immutables.amount);
@@ -78,20 +75,22 @@ contract EscrowDst is Escrow, IEscrowDst {
      */
     function _withdraw(bytes32 secret, Immutables calldata immutables)
         internal
-        onlyValidImmutables(immutables.hash())
-        onlyValidSecret(secret, immutables.hashlock)
+        onlyValidImmutables(immutables)
+        onlyValidSecret(secret, immutables)
     {
-        uint256 integratorFeeAmount = immutables.integratorFeeAmountCd();
-        uint256 protocolFeeAmount = immutables.protocolFeeAmountCd();
-        if (integratorFeeAmount > 0) {
-            _uniTransfer(immutables.token.get(), immutables.integratorFeeRecipientCd().get(), integratorFeeAmount);
+        address token = immutables.token.get();
+        address to = immutables.maker.get();
+        if (token == address(0)) {
+            /**
+             * @dev The result of the call is not checked intentionally. This is done to ensure that
+             * even in case of malicious receiver the withdrawal flow can not be blocked and takers
+             * will be able to get their safety deposit back.
+             **/
+            to.call{ value: immutables.amount }("");
+        } else {
+            IERC20(token).safeTransfer(to, immutables.amount);
         }
-        if (protocolFeeAmount > 0) {
-            _uniTransfer(immutables.token.get(), immutables.protocolFeeRecipientCd().get(), protocolFeeAmount);
-        }
-        uint256 amount = immutables.amount - integratorFeeAmount - protocolFeeAmount;
-        _uniTransfer(immutables.token.get(), immutables.maker.get(), amount);
         _ethTransfer(msg.sender, immutables.safetyDeposit);
-        emit EscrowWithdrawal(secret);
+        emit Withdrawal(secret);
     }
 }

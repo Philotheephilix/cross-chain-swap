@@ -21,7 +21,6 @@ interface IBaseEscrow {
         uint256 amount;
         uint256 safetyDeposit;
         Timelocks timelocks;
-        bytes parameters;  // For now only EscrowDst.withdraw() uses it.
     }
 
     /**
@@ -40,7 +39,7 @@ interface IBaseEscrow {
      * @notice Emitted on successful withdrawal.
      * @param secret The secret that unlocks the escrow.
      */
-    event EscrowWithdrawal(bytes32 secret);
+    event Withdrawal(bytes32 secret);
 
     error InvalidCaller();
     error InvalidImmutables();

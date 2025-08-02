@@ -22,31 +22,27 @@ abstract contract BaseEscrow is IBaseEscrow {
     using TimelocksLib for Timelocks;
     using ImmutablesLib for Immutables;
 
-    // Token that is used to access public withdraw or cancel functions.
-    IERC20 private immutable _ACCESS_TOKEN;
-
     /// @notice See {IBaseEscrow-RESCUE_DELAY}.
     uint256 public immutable RESCUE_DELAY;
     /// @notice See {IBaseEscrow-FACTORY}.
     address public immutable FACTORY = msg.sender;
 
-    constructor(uint32 rescueDelay, IERC20 accessToken) {
+    constructor(uint32 rescueDelay) {
         RESCUE_DELAY = rescueDelay;
-        _ACCESS_TOKEN = accessToken;
     }
 
-    modifier onlyTaker(address taker) {
-        if (msg.sender != taker) revert InvalidCaller();
+    modifier onlyTaker(Immutables calldata immutables) {
+        if (msg.sender != immutables.taker.get()) revert InvalidCaller();
         _;
     }
 
-    modifier onlyValidImmutables(bytes32 immutablesHash) virtual {
-        _validateImmutables(immutablesHash);
+    modifier onlyValidImmutables(Immutables calldata immutables) virtual {
+        _validateImmutables(immutables);
         _;
     }
 
-    modifier onlyValidSecret(bytes32 secret, bytes32 hashlock) {
-        if (_keccakBytes32(secret) != hashlock) revert InvalidSecret();
+    modifier onlyValidSecret(bytes32 secret, Immutables calldata immutables) {
+        if (_keccakBytes32(secret) != immutables.hashlock) revert InvalidSecret();
         _;
     }
 
@@ -60,18 +56,13 @@ abstract contract BaseEscrow is IBaseEscrow {
         _;
     }
 
-    modifier onlyAccessTokenHolder() {
-        if (_ACCESS_TOKEN.balanceOf(msg.sender) == 0) revert InvalidCaller();
-        _;
-    }
-
     /**
      * @notice See {IBaseEscrow-rescueFunds}.
      */
     function rescueFunds(address token, uint256 amount, Immutables calldata immutables)
         external
-        onlyTaker(immutables.taker.get())
-        onlyValidImmutables(immutables.hash())
+        onlyTaker(immutables)
+        onlyValidImmutables(immutables)
         onlyAfter(immutables.timelocks.rescueStart(RESCUE_DELAY))
     {
         _uniTransfer(token, msg.sender, amount);
@@ -100,7 +91,7 @@ abstract contract BaseEscrow is IBaseEscrow {
     /**
      * @dev Should verify that the computed escrow address matches the address of this contract.
      */
-    function _validateImmutables(bytes32 immutablesHash) internal view virtual;
+    function _validateImmutables(Immutables calldata immutables) internal view virtual;
 
     /**
      * @dev Computes the Keccak-256 hash of the secret.

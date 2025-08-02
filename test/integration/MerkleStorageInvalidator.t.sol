@@ -14,7 +14,7 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
     uint256 public constant PARTS_AMOUNT = 100;
     uint256 public constant SECRETS_AMOUNT = PARTS_AMOUNT + 1; // 1 extra to be able to fill the whole amount
 
-    Merkle public merkle;
+    Merkle public merkle = new Merkle();
     bytes32 public root;
     bytes32[] public hashedSecrets = new bytes32[](SECRETS_AMOUNT);
     bytes32[] public hashedPairs = new bytes32[](SECRETS_AMOUNT);
@@ -22,8 +22,6 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
 
     function setUp() public virtual override {
         BaseSetup.setUp();
-
-        merkle = new Merkle();
 
         for (uint64 i = 0; i < SECRETS_AMOUNT; i++) {
             // Note: This is not production-ready code. Use cryptographically secure random to generate secrets.
@@ -67,6 +65,8 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
         (bool success,) = srcClone.call{ value: SRC_SAFETY_DEPOSIT }("");
         assertEq(success, true);
 
+        uint256 resolverCredit = feeBank.availableCredit(bob.addr);
+
         vm.prank(bob.addr);
         limitOrderProtocol.fillOrderArgs(
             swapData.order,
@@ -77,6 +77,7 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
             args
         );
 
+        assertEq(feeBank.availableCredit(bob.addr), resolverCredit);
         assertEq(usdc.balanceOf(srcClone), makingAmount);
     }
 
@@ -399,6 +400,8 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
         (bool success,) = srcClone.call{ value: SRC_SAFETY_DEPOSIT }("");
         assertEq(success, true);
 
+        uint256 resolverCredit = feeBank.availableCredit(bob.addr);
+
         vm.prank(bob.addr);
         limitOrderProtocol.fillOrderArgs(
             swapData.order,
@@ -409,6 +412,7 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
             args
         );
 
+        assertEq(feeBank.availableCredit(bob.addr), resolverCredit);
         assertEq(usdc.balanceOf(srcClone), makingAmount);
     }
 
@@ -443,6 +447,8 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
         (bool success,) = srcClone.call{ value: SRC_SAFETY_DEPOSIT }("");
         assertEq(success, true);
 
+        uint256 resolverCredit = feeBank.availableCredit(bob.addr);
+
         vm.prank(bob.addr);
         limitOrderProtocol.fillOrderArgs(
             swapData.order,
@@ -453,6 +459,7 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
             args
         );
 
+        assertEq(feeBank.availableCredit(bob.addr), resolverCredit);
         assertEq(usdc.balanceOf(srcClone), makingAmount);
 
         // ------------ 2nd fill ------------ //
@@ -530,6 +537,8 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
         (bool success,) = srcClone.call{ value: SRC_SAFETY_DEPOSIT }("");
         assertEq(success, true);
 
+        uint256 resolverCredit = feeBank.availableCredit(bob.addr);
+
         vm.prank(bob.addr);
         limitOrderProtocol.fillOrderArgs(
             swapData.order,
@@ -540,6 +549,7 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
             args
         );
 
+        assertEq(feeBank.availableCredit(bob.addr), resolverCredit);
         assertEq(usdc.balanceOf(srcClone), MAKING_AMOUNT);
     }
 
@@ -835,15 +845,7 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
         rootPlusAmount = bytes32(secretsAmount << 240 | uint240(uint256(root)));
 
         CrossChainTestLib.SwapData memory swapData = _prepareDataSrcCustom(
-            rootPlusAmount, 
-            makingAmount, 
-            TAKING_AMOUNT, 
-            SRC_SAFETY_DEPOSIT, 
-            DST_SAFETY_DEPOSIT, 
-            address(0), 
-            false, 
-            true,
-            ""
+            rootPlusAmount, makingAmount, TAKING_AMOUNT, SRC_SAFETY_DEPOSIT, DST_SAFETY_DEPOSIT, address(0), false, true
         );
 
         swapData.immutables.hashlock = hashedS[idx];
@@ -869,6 +871,8 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
         (bool success,) = srcClone.call{ value: SRC_SAFETY_DEPOSIT }("");
         assertEq(success, true);
 
+        uint256 resolverCredit = feeBank.availableCredit(bob.addr);
+
         vm.prank(bob.addr);
         limitOrderProtocol.fillOrderArgs(
             swapData.order,
@@ -879,6 +883,7 @@ contract MerkleStorageInvalidatorIntTest is BaseSetup {
             args
         );
 
+        assertEq(feeBank.availableCredit(bob.addr), resolverCredit);
         assertEq(usdc.balanceOf(srcClone), makingAmountToFill);
     }
 

@@ -37,7 +37,7 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
       - name: Run tests
         run: FOUNDRY_PROFILE=default forge test -vvv --gas-report
-
+  
   test-zksync:
     runs-on: ubuntu-latest
     steps:
@@ -47,12 +47,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: matter-labs/foundry-zksync
-          ref: 'main'
+          ref: 'dev'
           path: 'foundry-zksync'
+
       - name: Install Foundry for zksync
-        run: cd foundry-zksync/foundryup-zksync && ../install-foundry-zksync
+        run: cd foundry-zksync && ./install-foundry-zksync
+  
       - name: Run tests
-        run: FOUNDRY_PROFILE=zksync forge test -vvv --zksync --force
+        run: FOUNDRY_PROFILE=zksync forge test -vvv --zksync
 
   coverage:
     runs-on: ubuntu-latest
@@ -64,6 +66,26 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
       - name: Run coverage
         run: yarn coverage
+      - uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  coverage-zksync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/checkout@v4
+        with:
+          repository: matter-labs/foundry-zksync
+          ref: 'dev'
+          path: 'foundry-zksync'
+
+      - name: Install Foundry for zksync
+        run: cd foundry-zksync && ./install-foundry-zksync
+      - name: Run coverage
+        run: yarn coverage:zksync
       - uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
